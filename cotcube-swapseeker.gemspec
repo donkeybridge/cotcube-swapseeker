@@ -26,16 +26,15 @@ Gem::Specification.new do |spec|
   spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }
   spec.require_paths = ['lib']
 
-  spec.add_dependency 'cotcube-indicators'
-  spec.add_dependency 'cotcube-helpers'
-  spec.add_dependency 'yaml'
-  spec.add_dependency 'activesupport'
-  spec.add_dependency 'colorize'
-  spec.add_dependency 'httparty'
-  spec.add_dependency 'rubyzip'
+  spec.add_dependency 'activesupport',      '~> 6'
+  spec.add_dependency 'colorize',           '~> 0.8'
+  spec.add_dependency 'cotcube-bardata',    '~> 0.1'
+  spec.add_dependency 'cotcube-indicators', '~> 0.1'
+  spec.add_dependency 'cotcube-helpers',    '~> 0.1'
+  spec.add_dependency 'yaml',               '~> 0.1'
 
 
-  spec.add_development_dependency 'rake'
+  spec.add_development_dependency 'rake',   '~> 13'
   spec.add_development_dependency 'rspec', '~>3.6'
   spec.add_development_dependency 'yard', '~>0.9'
 end
