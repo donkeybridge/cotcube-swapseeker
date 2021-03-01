@@ -4,7 +4,7 @@ module Cotcube
   module SwapSeeker
 
 
-    def symbols(config: init, type: nil)
+    def symbols(config: init, type: nil, symbol: nil)
       if config[:symbols_file].nil?
         SYMBOL_EXAMPLES
       else
@@ -14,6 +14,7 @@ module Cotcube
           .map{|row| [ :ticksize, :power, :bcf ].each {|z| row[z] = row[z].to_f}; row }
           .reject{|row| row[:id].nil? }
           .tap{|all| all.select!{|x| x[:type] == type} unless type.nil? }
+          .tap { |all| all.select! { |x| x[:symbol] == symbol } unless symbol.nil? }
       end
     end
 
@@ -72,6 +73,7 @@ module Cotcube
         dir = "#{config[:data_path]}/#{sym}"
         save_create_directory.call(dir)
       end
+      config
     end
   end
 end

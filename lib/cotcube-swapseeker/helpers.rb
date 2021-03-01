@@ -11,16 +11,17 @@ module Cotcube
         rad * Math::PI / 180
       end
 
-      def shear_to_deg(base:, deg:, x: :x, source: :y, target: :yy  )
-        shear_to_rad(base: base, rad: deg2rad(deg), x: x, source: source, target: target)
+      def shear_to_deg(base:, deg:)
+        shear_to_rad(base: base, rad: deg2rad(deg))
       end
 
-      def shear_to_rad(base: , rad:, x: :x, source: :y, target: :yy )
+      def shear_to_rad(base: , rad:)
         tan = Math.tan(rad)
         base.map { |dot| 
-          dot[target] = 
-            dot[source] + 
-            dot[x] * tan
+          # separating lines for easier debugging
+          dot[:yy] =
+            dot[:y] +
+              (dot[:dx].nil? ? dot[:x] : dot[:dx]) * tan
           dot
         }
       end
@@ -38,9 +39,7 @@ module Cotcube
       module_function :rad2deg, 
         :deg2rad, 
         :shear_to_deg, 
-        :shear_to_rad,
-        :triangulate,
-        :detect_slope
+        :shear_to_rad
     end
   end
 end
