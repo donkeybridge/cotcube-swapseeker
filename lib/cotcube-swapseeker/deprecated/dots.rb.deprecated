@@ -9,7 +9,7 @@ module Cotcube
              interval: :synth,     # same as in Bardata, the size of the each bar
              filter:   :full,      # same as in Bardata, the domain of definition of retrieved bars
              swap_type: :full,     # the domain of definition for the swap detection. 
-             # :full, :rth, :_24x7_ et al.
+             # :full, :rth, :rtc et al.
              include_holidays: false,
              debug: false,
              measure: false,
