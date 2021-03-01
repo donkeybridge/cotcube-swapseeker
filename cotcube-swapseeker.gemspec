@@ -32,6 +32,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'cotcube-indicators', '~> 0.1'
   spec.add_dependency 'cotcube-helpers',    '~> 0.1'
   spec.add_dependency 'yaml',               '~> 0.1'
+  spec.add_dependency 'mongoid',            '~> 7'
 
 
   spec.add_development_dependency 'rake',   '~> 13'
