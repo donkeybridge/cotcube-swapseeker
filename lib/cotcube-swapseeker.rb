@@ -55,7 +55,7 @@ module Cotcube
       :config_path,        # provides the path of configuration directory
       :config_prefix,      # provides the prefix of the configuration directory according to OS-specific FSH
       #:stencil,            # the stecil that merges with the base to eventually provide dots
-      :dots,               # consisting of :upper and :lower, dots are the normalized series to start shearing
+# deprecated      #:dots,               # consisting of :upper and :lower, dots are the normalized series to start shearing
       :triangulate,
       :detect_slope,
       :swapproximate_eod,
