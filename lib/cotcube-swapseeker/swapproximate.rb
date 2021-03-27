@@ -55,7 +55,6 @@ module Cotcube
       debug: false,
       types: nil,
       sides: nil,
-      recursive: false,
       measure: false
     )
 
@@ -159,7 +158,7 @@ module Cotcube
           #####################################################################################
 
 
-          stencil  = Stencil.new( interval: :synthetic, swap_type: swap_type, debug: debug, today: date, contract: contract )
+          stencil  = Stencil.new( interval: :synthetic, swap_type: swap_type, debug: debug, date: date, contract: contract )
           measuring.call("Stencil for #{combo} created")
 	  # rth calculation begins 100 days before first appearance in ML, hence data earlier on is filled with daily data
           if [:rth, :rthc].include? swap_type
@@ -176,9 +175,12 @@ module Cotcube
             return []
           end
           stencil.stencil.map! do |day| 
-            if day[:close]
-              day[:y] = (side == :upper ? (day[:high] - stencil.zero[:high]).round(9) : (stencil.zero[:low] - day[:low]).round(9) ) 
-              [ :open, :close, :type ].map{|z| day.delete(z) }
+            if day[:high] or day[:low]
+              day[:y] =
+                (side == :upper ?
+                 (day[:high] - stencil.zero[:high]).round(9) :
+                 (stencil.zero[:low] - day[:low]).round(9)
+                )
             end
             day
           end
@@ -204,7 +206,7 @@ module Cotcube
 
           combo = "#{swap_type.to_s}_#{side.to_s}"
           puts "DEBUG in swapproximate: detecting within '#{combo}'." if debug
-          result[combo].swaps = triangulate(base: result[combo].base, deviation: 2, once: false, side: side, recursive: recursive, debug: debug)
+          result[combo].swaps = triangulate(base: result[combo].base, deviation: 2, once: false, side: side, debug: debug, contract: contract)
           puts "DEBUG in swapprocimate: detection for '#{combo}' finished" if debug
           result.delete(combo) if result[combo].swaps.empty? and not keep
 
