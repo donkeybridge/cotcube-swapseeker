@@ -16,17 +16,26 @@ module Cotcube
         # --- finally, :deg is adjusted to the actual slope with a Math.atan operation
         #
         raise ArgumentError, 'detect_slope needs param Array :base' unless base.is_a? Array
+
+        # from given base, choose non-negative stencil containing values
         old_base = base.dup.select{|b| b[:x] >= 0 and not b[:y].nil? }
 
-
+        # some debug output
         old_base.each {|x| p x} if old_base.size < 50 and debug
+
+        # set initial shearing angle if not given as param
         deg ||= -max / 2.0 
+
+        # create first sheering. please note how selection working with d[:yy]
         new_base = shear_to_deg(base: old_base, deg: deg).select { |d| d[:yy] >= 0 }
+
+        # debug output
         puts "Iterating slope:\t#{format '% 7.5f',deg
                            }\t\t#{new_base.size
                            } || #{new_base.values_at(*[0]).map{|f| "'#{f[:x]
                                                                     } | #{format format,f[:y]
                                                                     } | #{format format,f[:yy]}'"}.join(" || ") }" if debug
+        # set initial part to deg
         part = deg.abs
         #
         # the loop, that runs until either
@@ -36,28 +45,33 @@ module Cotcube
         #
         until deg.round(8).zero? ||
             ((new_base.size >= 2) && (new_base.map { |f| f[:yy].round(8).zero? }.uniq.size == 1))
+
           part /= 2.0
-          # if new_base.size == 2 and not predicted
-          #   deg = rad2deg(Math.atan((new_base[0][:yy] - new_base[0][:y]) / new_base[0][:x])) unless new_base[0][:yy].zero?
-          #
-          #   puts "Predicting #{deg.round(8)} as result."
-          #   predicted = true
-          # end
-          if new_base.size == 1 # the graph was sheared too far, reuse old_base
+          if new_base.size == 1
+            # the graph was sheared too far, reuse old_base
             deg = deg + part
           else
             # the graph was sheared too short, continue with new base
             deg = deg - part
             old_base = new_base.dup
           end
+
+          # the actual sheering operation
+          # note that this basically maps old_base with yy = y + (dx||x * tan(deg) )
+          #
           new_base = shear_to_deg(base: old_base, deg: deg).select { |d| d[:yy] >= 0 }
           new_base.last[:dx] = 0.0 
-          #puts "Iterating slope:\t#{format '% 8.5f',deg
-          #                      }\t#{new_base.size
-          #                    } || #{new_base.values_at(*[0]).map{|f| "'#{f[:x]
-          #                                                          } | #{format format,f[:y]
-          #                                                          } | #{format format,f[:yy]}'"}.join(" || ") }" if debug
+          if debug
+            puts "Iterating slope:\t#{format '% 8.5f',deg
+                                 }\t#{new_base.size
+                               } || #{new_base.values_at(*[0]).map{|f| "'#{f[:x]
+                                                                     } | #{format format,f[:y]
+                                                                     } | #{format format,f[:yy]}'"}.join(" || ") }"
+          end
         end
+
+        ### Sheering ends here
+
         # define the approximited result as (also) 0.0
         new_base.each{|x| x[:yy] = 0.0}
         if debug
@@ -66,8 +80,9 @@ module Cotcube
           puts "RESULT #{deg} #{deg2rad(deg)}"
         end
         if deg.round(8).zero?
-          return { deg: 0,  members: new_base.map { |x| xx = x.dup; %i[y yy].map { |z|  xx.delete(z) }; xx } }
+          return { deg: 0,  members: new_base.map { |x| xx = x.dup; %i[y yy].map { |z|  xx[z]=nil }; xx } }
         end
+
         # the promised atan operation the find the perfect slope angle
         #
         # the atan actually is not needed, as the result of the binary search should be exact enough
@@ -80,23 +95,25 @@ module Cotcube
                       )
         # TODO: change or add, so that calculus returns actual expectation value for future dates as well
         function  = lambda {|x| x * slope }
+
         actual    = lambda {|x| 
           if side==:upper
             new_base.last[:high] + x * slope 
           elsif side == :lower
             new_base.last[:low] - x * slope
           else
-            "ERROR: NO actual withoud :side (lambda in detect_slope)!".light_red
+            "ERROR: Cannot provide actual without given :side (lambda in detect_slope)!".light_red
           end
         }
+
         calculus_lambda  = lambda do  |dev: max_dev, members: []|
-          upper = side == :upper
-          clusters = [] 
+          upper        = side == :upper
+          clusters     = []
           unclustered  = [] 
           base.map do |d| 
             # what would y be if I'd call the function
             d[:sy] = function.call(d[:dx].nil? ? d[:x] : d[:dx])
-            # what is the distance to actual y in ticks
+            # what is the distance to actual y
             d[:dy] = d[:sy] - d[:y]
             # same in ticks
             d[:t]  = d[:dy] / ticksize if ticksize.is_a?(Float) and not ticksize.zero?
@@ -188,7 +205,7 @@ module Cotcube
 
         # the result
         # puts "got #{deg.round(8)} as result"
-        { error: '', 
+        res = { error: '',
           deg:       deg, 
           atan:      atan,
           slope:     slope,
@@ -197,6 +214,8 @@ module Cotcube
           calculus:  calculus_lambda,
           members:   new_base.map { |x| x.dup }
         }
+          res[:obj] = Line.new(res.clone.select{|k,_| %i[deg slope].include? j} )
+        res
       end
     end
   end
