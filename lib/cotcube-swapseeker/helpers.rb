@@ -17,12 +17,12 @@ module Cotcube
 
       def shear_to_rad(base: , rad:)
         tan = Math.tan(rad)
-        base.map { |dot| 
+        base.map { |bar|
           # separating lines for easier debugging
-          dot[:yy] =
-            dot[:y] +
-              (dot[:dx].nil? ? dot[:x] : dot[:dx]) * tan
-          dot
+          bar[:yy] =
+            bar[:y] +
+            (bar[:dx].nil? ? bar[:x] : bar[:dx]) * tan
+          bar
         }
       end
     end
