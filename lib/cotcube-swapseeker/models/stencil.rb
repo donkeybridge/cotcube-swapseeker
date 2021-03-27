@@ -27,7 +27,7 @@ module Cotcube
               raise ArgumentError, "Cannot open stencil from non-existant file #{file}."
             end
           end
-          CSV.read(file).map{|x| {datetime: CHICAGO.parse(x.first), x: x.last.to_i.freeze } }
+          CSV.read(file).map{|x| Bar.new({datetime: CHICAGO.parse(x.first).freeze, x: x.last.to_i.freeze }) }
         end
         unless const_defined? :RAW_STENCILS
           const_set :RAW_STENCILS, { daily:
@@ -45,7 +45,7 @@ module Cotcube
         swap_type:,
         ranges: nil,                # currently not used, prepared to be used in connection intraday
         contract: nil,
-        today: nil,                 # today and now are mutually exclusive, being used with dailies in the first, with intraday in latter case
+        date: nil,
         debug: false,
         version: nil,               # when referring to a specicic version of the stencil
         timezone: CHICAGO,
@@ -86,15 +86,16 @@ module Cotcube
         base = stencil || Stencil.provide_raw_stencil(type: stencil_type, interval: :daily, version: version)
 
         # fast forward to prev trading day
-        @today = today || Date.today
-        best_match = base.select{|x| x[:datetime].to_date <= @today}.last[:datetime]
-        @today  = best_match
+        date = ActiveSupport::TimeWithZone.parse(date) unless [NilClass, Date, ActiveSupport::TimeWithZone].include? date.class
+        @date = date || Date.today
+        best_match = base.select{|x| x[:datetime].to_date <= @date}.last[:datetime]
+        @date  = best_match
 
-        offset = base.map{|x| x[:datetime]}.index(@today)
+        offset = base.map{|x| x[:datetime]}.index(@date)
 
-        # apply offset to stencil, so zero will match today (or what was provided as 'today')
+        # apply offset to stencil, so zero will match today (or what was provided as 'date')
         @base = base.map.
-          each_with_index{|d,i| { datetime: d[:datetime].freeze, x: (offset - i ).freeze } }
+          each_with_index{|d,i| d[:x] = (offset - i).freeze; d }
         # if range was given, shrink stencil to specified range
         @base.select!{|d| (d[:datetime] >= starter and d[:datetime] <= ender) } unless range.nil?
       else
@@ -107,7 +108,7 @@ module Cotcube
         debug:      @debug,
         interval:   @interval,
         swap_type:  @swap_type,
-        today:      @today,
+        date:       @date,
         contract:   @contract,
         stencil:    @base.map{|x| x.dup}
       )
@@ -115,7 +116,7 @@ module Cotcube
 
 
     def zero
-      @zero ||=  @base.find{|x| x[:x].zero? }
+      @zero ||=  @base.find{|b| b[:x].zero? }
     end
 
     def stencil
@@ -129,13 +130,13 @@ module Cotcube
 
     # convenient output of stencil data and attached swaps (if any)
     def inspect
-      "#<Stencil:0x0815> @contract:#{@contract} @interval:#{@interval} @swaps:#{@swaps.size} @base:#{@base.size} today:#{@today}" +
+      "#<Stencil:0x0815> @contract:#{@contract} @interval:#{@interval} @swaps:#{@swaps.size} @base:#{@base.size} date:#{@date}" +
         @swaps.each_with_index.map { |swap,i|
         len = swap[:members].first[:x] + 1
         mem = swap[:members].size
         # the guess stencil is quite overloaded, but I don't have access to a stencil with future dates yet at this point
         guess_stencil  = Stencil.
-          new( interval: :synthetic, swap_type: @swap_type, debug: @debug, today: @today, contract: @contract ).
+          new( interval: :synthetic, swap_type: @swap_type, debug: @debug, date: @date, contract: @contract ).
           stencil.
           select{|s| s[:x] < 0}.
           first
@@ -180,16 +181,16 @@ module Cotcube
         base ||= Cotcube::Bardata.provide contract: contract, interval: @interval, filter: @filter, range: (integer_range ? nil : range)
         base = base[range] if integer_range
         offset = 0
-        base.each_with_index do |_,i|
+        base.each_index do |i|
           begin
-            offset += 1 while @base[i+offset][:datetime] < base[i][:datetime]
+            offset += 1 while @base[i+offset][:datetime].to_date < base[i][:datetime].to_date
           rescue Exception => ex
             puts("ERROR processing #{i} + #{offset} on #{@base[i+offset]} vs #{base[i]}")
             puts("======= ERROR: '#{ex.class}', MESSAGE: '#{ex.message}'")
             puts "WARNING: Holiday found. skipping!".light_yellow
             next
           end
-          if @base[i+offset][:datetime] > base[i][:datetime]
+          if @base[i+offset][:datetime].to_date > base[i][:datetime].to_date
             puts "skipping #{base[i]}".light_yellow if @debug
             offset -= 1
             next
@@ -198,7 +199,10 @@ module Cotcube
           # the following line does the actual injection
           # NOTE: for each node, data is only injected, if it only contains the
           #       basice keys :datetime and :x
-          @base[j] = @base[j].merge(base[i]) if @base[j].keys.size == 2
+          @base[j].merge(base[i]) if @base[j].high.nil? and @base[j].low.nil?
+        end
+        if zero[:volume].nil? or zero[:volume] < 100
+          puts "WARNING from Stencil.inject_base: Data for #{@date.strftime('%Y-%m-%d')} is based on low volume!".light_yellow
         end
       end
 
