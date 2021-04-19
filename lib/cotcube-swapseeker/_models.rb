@@ -14,9 +14,10 @@ end
 # Contract has many swaps
 #      belongs to asset
 # Swap belongs to day and contract
-#      embeds members, line and guess
+#      embeds members (bars)
 
-%i[bar line day asset contract member swap].each do |model|
+%i[bar line day asset contract swap].each do |model|
+  puts "Requiring #{model}"
   require_relative "#{__dir__}/models/#{model}" 
 end
 
