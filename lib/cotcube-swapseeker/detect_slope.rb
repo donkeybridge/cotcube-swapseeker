@@ -43,8 +43,8 @@ module Cotcube
         #   - the slope has even angle
         #   - several points are on the slope in quite a good approximation ('round(8)')
         #
-        until deg.round(8).zero? ||
-            ((new_base.size >= 2) && (new_base.map { |f| f[:yy].round(8).zero? }.uniq.size == 1))
+        until deg.round(7).zero? ||
+            ((new_base.size >= 2) && (new_base.map { |f| f[:yy].round(7).zero? }.uniq.size == 1))
 
           part /= 2.0
           if new_base.size == 1
@@ -62,25 +62,26 @@ module Cotcube
           new_base = shear_to_deg(base: old_base, deg: deg).select { |d| d[:yy] >= 0 }
           new_base.last[:dx] = 0.0 
           if debug
-            puts "Iterating slope:\t#{format '% 8.5f',deg
-                                 }\t#{new_base.size
-                               } || #{new_base.values_at(*[0]).map{|f| "'#{f[:x]
-                                                                     } | #{format format,f[:y]
-                                                                     } | #{format format,f[:yy]}'"}.join(" || ") }"
+            print " #{format '% 8.5f',deg}"
+            #puts "Iterating slope:\t#{format '% 8.5f',deg
+            #                     }\t#{new_base.size
+            #                   } || #{new_base.values_at(*[0]).map{|f| "'#{f[:x]
+            #                                                         } | #{format format,f[:y]
+            #                                                         } | #{format format,f[:yy]}'"}.join(" || ") }"
           end
         end
+        puts ' done.' if debug
 
         ### Sheering ends here
 
         # define the approximited result as (also) 0.0
         new_base.each{|x| x[:yy] = 0.0}
         if debug
-          puts "RESULT: "
-          new_base.each {|f| puts "\t#{f}" }
-          puts "RESULT #{deg} #{deg2rad(deg)}"
+          puts "RESULT: #{deg} #{deg2rad(deg)}"
+          new_base.each {|f| puts "\t#{f.inspect}" }
         end
-        if deg.round(8).zero?
-          return { deg: 0,  members: new_base.map { |x| xx = x.dup; %i[y yy].map { |z|  xx[z]=nil }; xx } }
+        if deg.round(7).zero?
+          return Swap.new ({ deg: 0,  slope: 0, members: new_base.map { |x| xx = x.dup; %i[y yy].map { |z|  xx[z]=nil }; xx } })
         end
 
         # the promised atan operation the find the perfect slope angle
@@ -88,11 +89,16 @@ module Cotcube
         # the atan actually is not needed, as the result of the binary search should be exact enough
         atan = nil # rad2deg(Math.atan((new_base[0][:yy] - new_base[0][:y]) / new_base[0][:x])) unless new_base[0][:yy].zero?
 
-        # y = m x + n --> n = y - mx
+        #####################################################################################
+        # Calculate the slope bsaed on the angle that resulted above
+        #     y = m x + n -->
+        #                     m = delta-y / delta-x
+        #                     n = y0 - m * x0
+        #
         slope     = (new_base.first[:y] - new_base.last[:y]) / (
                         (new_base.first[:dx].nil? ? new_base.first[:x] : new_base.first[:dx]).to_f - 
                         (new_base. last[:dx].nil? ? new_base. last[:x] : new_base. last[:dx]).to_f 
-                      )
+                    )
         # TODO: change or add, so that calculus returns actual expectation value for future dates as well
         function  = lambda {|x| x * slope }
 
@@ -106,6 +112,9 @@ module Cotcube
           end
         }
 
+        #############################################################################################
+        # The calculus gives an overview over the quality of the slope.
+
         calculus_lambda  = lambda do  |dev: max_dev, members: []|
           upper        = side == :upper
           clusters     = []
@@ -118,9 +127,8 @@ module Cotcube
             # same in ticks
             d[:t]  = d[:dy] / ticksize if ticksize.is_a?(Float) and not ticksize.zero?
           end
-          puts '-'*60
-          puts " "
-          tick_range = Cotcube::Helpers.simple_series_stats(prefix: 'tick_range', base: base, ind: :range, dim: 0.01){|x| (x[:high] - x[:low]) / ticksize }
+          puts 'CALCULUS:'.light_green
+          tick_range = Cotcube::Helpers.simple_series_stats(prefix: 'daily range', base: base, ind: :temp, dim: 0.01){|x| (x[:high] - x[:low]) / ticksize }
           tick_dist  = Cotcube::Helpers.simple_series_stats(prefix: 'tick_dist to slope', base: base, ind: :t, dim: 0.01)
           puts " "
 
@@ -201,22 +209,26 @@ module Cotcube
             } 
           end
         end 
-        calculus_lambda.call if calculus
+        calculus_lambda.call if calculus or debug
 
         # the result
         # puts "got #{deg.round(8)} as result"
-        res = { error: '',
-          deg:       deg, 
-          atan:      atan,
-          slope:     slope,
-          function:  function,
-          actual:    actual,
-          calculus:  calculus_lambda,
+        res = Cotcube::SwapSeeker::Swap.new({
+          deg:        deg,
+          slope:      slope,
           members:   new_base.map { |x| x.dup }
-        }
-          res[:obj] = Line.new(res.clone.select{|k,_| %i[deg slope].include? j} )
+        })
         res
       end
+    end
+  end
+end
+
+
+module Cotcube
+  module SwapSeeker
+    module Helpers
+      module_function :detect_slope
     end
   end
 end

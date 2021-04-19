@@ -1,10 +1,16 @@
 module Cotcube
   module SwapSeeker
+
+    # members are the calculation base of the swaps
+    # in contrast to dots, that are based on actual intraday or EOD data
+    # so members are based on dots
+    #
+    # TODO: it might turn out that h, l, v, oi are not needed as they are already gathered in dots
     class Member
 
       include Mongoid::Document
       embedded_in :swap, class_name: 'Swap', inverse_of: :member
-      field :dt, as: :datetime, type: Date
+      field :dt, as: :datetime, type: DateTime
       field :x, type:  Integer
       field :dx, type: Float
       field :i, type: Integer
@@ -26,6 +32,16 @@ module Cotcube
           errors.add(:h, "The value '#{value}' is fragmented. Please fix before saving to DB") unless value.nil? or value == value.round(8)
         end
       end
+
+      def present
+        "#{self.datetime.strftime("%a, %Y-%m-%d %H:%M")
+                                   }  x: #{format '%-4d', self.x
+                                   } dx: #{format '%-4d', (self.dx.nil? ? self.x : self.dx)
+                                      }, #{self.swap.high ? "high" : "low"
+                                      }: #{format self.swap.asset.fmt, (self.upper ? self.high : self.low)
+                                   }, i: #{(format '%4d', self.i) unless self.i.nil?}"
+      end
+
 
     end
 
