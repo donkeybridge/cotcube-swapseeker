@@ -11,7 +11,7 @@ module Cotcube
       # Class method that loads the (latest) obligatory stencil for given interval and type.
       # These raw stencils are located in /var/cotcube/swapseeker/stencils
       #
-      # Current daily stencils contain dates from 2020-01-01 to 2023-12-21
+      # Current daily stencils contain dates from 2020-01-01 to 2023-12-31
       #
       def self.provide_raw_stencil(type:, interval: :daily, version: nil)
         loading = lambda do |typ|
@@ -28,15 +28,16 @@ module Cotcube
             end
           end
           CSV.read(file).map{|x| Bar.new({datetime: CHICAGO.parse(x.first).freeze, x: x.last.to_i.freeze }) }
+          #CSV.read(file).map{|x| Bar.new({datetime: Day.find_or_create_by(d: CHICAGO.parse(x.first).to_date).freeze, x: x.last.to_i.freeze }) }
         end
         unless const_defined? :RAW_STENCILS
           const_set :RAW_STENCILS, { daily:
                                      { full: loading.call( :full).freeze,
                                        rtc:  loading.call( :rtc).freeze
-          }.freeze
+            }.freeze
           }.freeze
         end
-        RAW_STENCILS[interval][type]
+        RAW_STENCILS[interval][type].map{|x| x.dup}
       end
 
       def initialize(
@@ -50,13 +51,15 @@ module Cotcube
         version: nil,               # when referring to a specicic version of the stencil
         timezone: CHICAGO,
         stencil: nil,               # instead of loading, use this data
-        config: init
+        config: init,
+        warnings: true
       )
         @debug     = debug
         @interval  = interval
         @swap_type = swap_type
         @swaps     = []
         @contract  = contract
+        @warnings = warnings
         step =  case @interval
                 when :hours, :hour; 1.hour
                 when :quarters, :quarter; 15.minutes
@@ -81,7 +84,7 @@ module Cotcube
         # TODO: Check / warn / raise whether stencil (if provided) is a proper data type
         raise ArgumentError, "Stencil should be nil or Array" unless [NilClass, Array].include? stencil.class
         raise ArgumentError, "Each stencil members should contain at least :datetime and :x" unless stencil.nil? or
-          stencil.map{|x| ([:datetime, :x] - x.keys).empty? and x[:datetime].is_a?(ActiveSupport::TimeWithZone) and x[:x].is_a?(Integer)}.reduce(:&)
+          stencil.map{|x| ([:datetime, :x] - x.keys).empty? and [ActiveSupport::TimeWithZone, Day].include?( x[:datetime] ) and x[:x].is_a?(Integer)}.reduce(:&)
 
         base = stencil || Stencil.provide_raw_stencil(type: stencil_type, interval: :daily, version: version)
 
@@ -124,7 +127,7 @@ module Cotcube
     end
 
     def swaps=(swaps)
-      puts "WARNING: overwriting existing swaps!".light_yellow unless @swaps.nil?
+      puts "WARNING: overwriting existing swaps!".light_yellow if @warnings and not @swaps.nil?
       @swaps = swaps
     end
 
@@ -132,28 +135,31 @@ module Cotcube
     def inspect
       "#<Stencil:0x0815> @contract:#{@contract} @interval:#{@interval} @swaps:#{@swaps.size} @base:#{@base.size} date:#{@date}" +
         @swaps.each_with_index.map { |swap,i|
-        len = swap[:members].first[:x] + 1
-        mem = swap[:members].size
+        len = swap.members.first[:x] + 1
+        mem = swap.members.size
         # the guess stencil is quite overloaded, but I don't have access to a stencil with future dates yet at this point
-        guess_stencil  = Stencil.
-          new( interval: :synthetic, swap_type: @swap_type, debug: @debug, date: @date, contract: @contract ).
-          stencil.
-          select{|s| s[:x] < 0}.
-          first
+        if swap[:guess].respond_to? :call
+          guess_stencil  = Stencil.
+            new( interval: :synthetic, swap_type: @swap_type, debug: @debug, date: @date, contract: @contract ).
+            stencil.
+            select{|s| s[:x] < 0}.
+            first
+          puts "GS: #{guess_stencil}"  if @debug
+        end
 
-        puts "GS: #{guess_stencil}"  if @debug
         rat = swap[:rating]
         col = (rat > 30) ? :magenta : (rat > 15) ? :light_magenta : (rat > 6) ? :light_green : swap[:rated] ? :light_yellow : :yellow
 
         "\n\t\tswap #{i}: len:#{    format '%3d', len
                          } rating:#{  format '%2d', swap[:rating]
                          } mem:#{     format '%2d', mem
-                         } deg:#{     format '%4.2f', swap[:deg]
-                         } first:#{   swap[:members].first[:datetime].strftime("%Y-%m-%d")
-                         } last:#{    swap[:members].last[:datetime].strftime("%Y-%m-%d")
-                         } current: #{swap[:actual].call(0)
-                         } guess: #{  swap[:guess].call(guess_stencil[:x]+1).round(8)
-                         } for: #{    guess_stencil[:datetime].strftime('%Y-%m-%d')
+                         } deg:#{     format '%5.2f', swap[:deg]
+                         } first:#{   swap.members.first[:datetime].strftime("%Y-%m-%d")
+                         } last:#{    swap.members.last[:datetime].strftime("%Y-%m-%d")
+                         } current: #{swap.members.last.send(swap.asset.fmt(swap.type.to_s =~ /upper/) ? :h : :l)
+                         } others:#{  swap.members[1...-1].map{|x| x[:datetime].strftime('%m-%d')}.join(' + ')
+                         #} guess: #{  swap[:guess].call(guess_stencil[:x]+1).round(8) if swap[:guess].respond_to? :call
+                         #} for: #{    guess_stencil[:datetime].strftime('%Y-%m-%d')   unless guess_stencil.nil?
                          }".colorize( col )
         }.join
       end
@@ -201,8 +207,9 @@ module Cotcube
           #       basice keys :datetime and :x
           @base[j].merge(base[i]) if @base[j].high.nil? and @base[j].low.nil?
         end
-        if zero[:volume].nil? or zero[:volume] < 100
+        if @warnings and (zero[:volume].nil? or zero[:volume] < 100)
           puts "WARNING from Stencil.inject_base: Data for #{@date.strftime('%Y-%m-%d')} is based on low volume!".light_yellow
+          @low_volume_warning = false
         end
       end
 
