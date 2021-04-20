@@ -5,7 +5,7 @@ module Cotcube
 
     ##############################################3
     # 
-    # the following method just call swapproximate_eod for the 300 days before given date
+    # the following method just call swapproximate_eod for the <pre=90> days before given date
     # based on provided types of stencils (full, rtc) and sides (upper, lower) each combo is iterated
     #
     ###############################################
@@ -13,11 +13,20 @@ module Cotcube
       date: Date.yesterday,
       contract:,
       holidays: Cotcube::Bardata.holidays.map{|day| day.to_date },
+      first_ml: nil,
+      auto: false,
       debug: false,
-      types: nil,
+      types: %i[full rth],
       sides: nil,
-      pre: 300
+      warnings: true,
+      pre: 90
     )
+      puts "swapproximate_run is deprecated or needs to be rewritten".light_red
+      return false
+
+      first_ml = Cotcube::Bardata.continuous_overview(symbol: contract[0..1])[contract].first[:date]
+      date     = Date.parse(first_ml)
+      last     = Cotcube::Bardata.provide(contract: contract).last[:datetime].to_date
       known_types = %i[full rtc rth rthc]
       known_sides = %i[upper lower]
       types ||= known_types
@@ -28,22 +37,78 @@ module Cotcube
       raise ArgumentError, "Unknown stencil types '#{sides - known_sides}'." unless (sides - known_sides).empty?
 
       date -= pre
-      300.times do
+      while date <= last
         date += 1
         next if [0,6].include?(date.wday) or holidays.include?(date)
-        s = swapproximate_eod(date: date, contract: contract, holidays: holidays, debug: debug, sides: sides, types: types)
-        if (not s) or s.empty?
+        stencils = swapproximate_eod(date: date, contract: contract, holidays: holidays, debug: debug, sides: sides, types: types, warnings: warnings, debug: debug)
+        if (not stencils) or stencils.empty?
           puts "No swaps to display." 
         else
-          s.each {|k,v| puts "#{k}\t#{v.inspect}"}
-          if s.map{|_,v| v.swaps}.flatten.map{|x| x[:rated]}.reduce(:|)
-            puts "press enter to continue"
+          stencils.each do |key,stencil|
+            puts "#{key}\t#{stencil.inspect}"
+            stencil.swaps.map do |swap|
+              if swap[:rated]
+                swap.save_or_make_frth
+              end
+            end
+          end
+          # if any of the swaps has the attribute 'rated', wait for ENTER
+          if not auto and stencils.map{|_,stencil| stencil.swaps}.flatten.map{|swap| swap[:rated]}.reduce(:|)
+            puts "Press enter to continue..."
             STDIN.gets
           end
 
         end
       end
     end
+
+    # the following method is considered the swapproximate EOD, that
+    #   1. checks which contracts are currently considered
+    #   2. fills all contracts back to the 90 days before first_ml
+    #   3. gets the normal eod done
+    #   4. retires contracts after their last
+    def swapproximate_daily(processes: 5, force_update: false, debug: false)
+      types = %i[full rth]
+      sides = %i[upper lower]
+      holidays = Cotcube::Bardata.holidays.map{|day| day.to_date }
+      considerables = Contracts.considerable
+      db_monitor = Monitor.new
+      expired_contracts = considerables.map{|x| x.s} - Cotcube::Bardata.provide_eods(threshold: 0)
+      Cotcube::Helpers.parallelize(considerables.sort_by{|x| x.s[0..1]}.to_a.each_slice(considerables.count / processes), processes: processes) do |chunk|
+        chunk.each do |contract|
+          puts "Processing #{contract.inspect}".light_white
+          if expired_contracts.include? contract.s and not force_update
+            puts "#{contract.s} already expired. Use :force_update to force.".light_red
+            puts "Currently no decommission of expired updates is enabled\n\n".light_red
+            next
+          end
+          date = contract.first_ml - 91.days
+          while date < Date.yesterday
+            contract.p ||= date
+            date += 1.day
+            next if date <= contract.p or
+              [0,6].include?(date.wday) or
+              holidays.include?(date)
+            stencils = swapproximate_eod(date: date, contract: contract.s, holidays: holidays, debug: false, sides: sides, types: types, warnings: false, force_update: force_update, debug: debug)
+            if (not stencils) or stencils.empty?
+              puts "No swaps to display."
+            else
+              stencils.each do |key,stencil|
+                puts "#{key}\t#{stencil.inspect}"
+                stencil.swaps.map do |swap|
+                  if swap[:rated]
+                    swap.save_or_make_frth
+                  end
+                end
+              end
+            end
+            puts ' '
+            contract.p = date; contract.save!
+          end
+        end
+      end
+    end
+
 
 
     def swapproximate_eod(
@@ -55,7 +120,9 @@ module Cotcube
       debug: false,
       types: nil,
       sides: nil,
-      measure: false
+      warnings: true,
+      measure: false,
+      force_update: false
     )
 
 
@@ -79,11 +146,11 @@ module Cotcube
       sides = [ sides ] unless sides.is_a? Array
       raise ArgumentError, "Unknown stencil types '#{types - known_types}'." unless (types - known_types).empty?
       raise ArgumentError, "Unknown stencil types '#{sides - known_sides}'." unless (sides - known_sides).empty?
- 
+
       date = Date.parse(date.to_s) if [Symbol,String].include? date.class
       date -= 1 while [0,6].include?(date.wday) or holidays.include?(date)
 
-      puts "Running swapproximate for "+date.strftime("%a, %Y-%m-%d").light_white
+      puts "Running swapproximate on #{contract} for "+date.strftime("%a, %Y-%m-%d").light_white
       sym  = Cotcube::Bardata.get_id_set contract: contract, symbol: symbol
 
       measuring.call("Requesting most_liquid for #{contract}")
@@ -126,7 +193,7 @@ module Cotcube
       #
       #############################################################################
 
-      base = Cotcube::Bardata.provide contract: contract, interval: :synthetic
+      base = Cotcube::Bardata.provide contract: contract, interval: :synthetic, force_update: force_update
       puts "Base.first is: #{base.first.values_at *%i[contract date volume]}" if debug
       puts "Base.last  is: #{base. last.values_at *%i[contract date volume]}" if debug
 
@@ -144,7 +211,7 @@ module Cotcube
       types.each do |swap_type|
         sides.each do |side|
 
-	  combo = "#{swap_type.to_s}_#{side.to_s}"
+          combo = "#{swap_type.to_s}_#{side.to_s}"
 
           ###################################################################################
           #
@@ -153,14 +220,14 @@ module Cotcube
           #    and the stencil provided lasts from day 'first' to 100 days after day 'last',
           #    while 'zero' remains the day where x is zero (commonly yesterday is zero)
           #
-          #    this is important is zero is the focal point or pivot point
+          #    this is important as zero is the focal point or pivot point
           #
           #####################################################################################
 
 
-          stencil  = Stencil.new( interval: :synthetic, swap_type: swap_type, debug: debug, date: date, contract: contract )
+          stencil  = Stencil.new( interval: :synthetic, swap_type: swap_type, debug: debug, date: date, contract: contract, warnings: warnings )
           measuring.call("Stencil for #{combo} created")
-	  # rth calculation begins 100 days before first appearance in ML, hence data earlier on is filled with daily data
+          # rth calculation begins 100 days before first appearance in ML, hence data earlier on is filled with daily data
           if [:rth, :rthc].include? swap_type
             rth_base = Cotcube::Bardata.provide contract: contract, interval: :days, filter: :rth
             stencil.inject_base(contract: contract, base: rth_base)
@@ -189,7 +256,7 @@ module Cotcube
 
           ################################################################################
           #
-          # next step is to load currently contracts swap_history and to check whether
+          # next step is to load currently contracts swap_history and to check
           #    1. which swaps ended yesterday
           #    2. which swaps are confirmed or approached
           #
@@ -197,17 +264,22 @@ module Cotcube
 
           ################################################################################
           #
-          # next step is to detect new swaps, create according output
+          # next step is to detect new swaps a.k.a swapproximation
           #
           ################################################################################
 
 
           measuring.call("Beginning of stage 4 (detecting new swaps)")
 
-          combo = "#{swap_type.to_s}_#{side.to_s}"
-          puts "DEBUG in swapproximate: detecting within '#{combo}'." if debug
-          result[combo].swaps = triangulate(base: result[combo].base, deviation: 2, once: false, side: side, debug: debug, contract: contract)
-          puts "DEBUG in swapprocimate: detection for '#{combo}' finished" if debug
+          measuring.call "DEBUG in swapproximate: detecting within '#{combo}."
+          result[combo].swaps = Cotcube::SwapSeeker::Helpers.triangulate(base: result[combo].base, deviation: 2, side: side, debug: debug, contract: contract)
+          result[combo].swaps.map do |x|
+            x.type     = combo
+            x.day      = Days.find_or_create_by(d: date)
+            x.contract = Contract.find_or_create_by(s: contract)
+            x.r        = x.members.map{|x| x[:i]}.sort.to_json
+          end
+          measuring.call "DEBUG in swapprocimate: detection for '#{combo}' finished"
           result.delete(combo) if result[combo].swaps.empty? and not keep
 
         end
